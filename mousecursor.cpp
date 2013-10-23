@@ -31,7 +31,8 @@ MouseCursor::MouseCursor() {
     system_cursor = true;
     cursortex     = 0;
     hidden        = false;
-    timeout       = 3.0f;
+    // timeout effects hover text
+    timeout       = 999.0f;
     idle          = timeout;
     scrollwheel   = 0;
     
