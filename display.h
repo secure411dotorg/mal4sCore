@@ -59,6 +59,7 @@ class SDLAppDisplay {
 
     bool enable_alpha;
     bool resizable;
+    bool fullscreen;
     bool frameless;
     bool vsync;
 
@@ -76,11 +77,12 @@ public:
 #if SDL_VERSION_ATLEAST(2,0,0)
     SDL_Window*   sdl_window;
     SDL_GLContext gl_context;
+
+    int framed_width, framed_height;
+    int framed_x, framed_y;
 #else
     SDL_Surface *surface;
 #endif
-
-    bool fullscreen;
     vec4 clear_colour;
 
     SDLAppDisplay();
@@ -88,10 +90,15 @@ public:
 
     void   getFullscreenResolution(int& width, int& height);
     void   toggleFullscreen();
+    void   toggleFrameless();
+
+    bool   isFullscreen() const;
+    bool   isFrameless() const;
+
     void   resize(int width, int height);
 
-    void   init(std::string window_title, int width, int height, bool fullscreen);
-    void   setVideoMode(int width, int height, bool fullscreen);
+    void   init(std::string window_title, int width, int height, bool fullscreen, int screen = -1);
+    void   setVideoMode(int width, int height, bool fullscreen, int screen = -1);
 
     bool   multiSamplingEnabled();
 

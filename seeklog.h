@@ -50,7 +50,7 @@ class StreamLog : public BaseLog {
 
     bool fcntl_fail;
 #ifdef _WIN32
-    HANDLE stdin_handle;
+    void* stdin_handle;
 #endif
 public:
     StreamLog();
@@ -74,7 +74,7 @@ class SeekLog : public BaseLog {
 
     std::string logfile;
 
-    long file_size;
+    long long file_size;
     float current_percent;
 
     bool readFully();
@@ -93,6 +93,6 @@ public:
     bool isFinished();
 };
 
-extern long gSeekLogMaxBufferSize;
+extern long long gSeekLogMaxBufferSize;
 
 #endif

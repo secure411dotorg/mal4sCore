@@ -53,6 +53,11 @@ SDLAppDisplay::SDLAppDisplay() {
 #if SDL_VERSION_ATLEAST(2,0,0)
     sdl_window = 0;
     gl_context = 0;
+
+    framed_width  = 0;
+    framed_height = 0;
+    framed_x      = 0;
+    framed_y      = 0;
 #else
     surface = 0;
 #endif
@@ -75,7 +80,7 @@ Uint32 SDLAppDisplay::SDLWindowFlags(bool fullscreen) {
     Uint32 flags = SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN;
 
     if (frameless) flags |= SDL_WINDOW_BORDERLESS;
-    if (resizable) flags |= SDL_WINDOW_RESIZABLE;
+    if (resizable && !frameless) flags |= SDL_WINDOW_RESIZABLE;
     if (fullscreen) flags |= SDL_WINDOW_FULLSCREEN;
 #else
     Uint32 flags = SDL_OPENGL | SDL_HWSURFACE | SDL_ANYFORMAT | SDL_DOUBLEBUF;
@@ -97,6 +102,10 @@ void SDLAppDisplay::setZBufferDepth(int zbuffer_depth) {
 
 void SDLAppDisplay::enableResize(bool resizable) {
     this->resizable = resizable;
+}
+
+void SDLAppDisplay::enableFrameless(bool frameless) {
+    this->frameless = frameless;
 }
 
 void SDLAppDisplay::enableAlpha(bool enable) {
@@ -139,7 +148,7 @@ LRESULT CALLBACK window_filter_proc(HWND wnd, UINT msg, WPARAM wparam, LPARAM lp
 }
 #endif
 
-void SDLAppDisplay::setVideoMode(int width, int height, bool fullscreen) {
+void SDLAppDisplay::setVideoMode(int width, int height, bool fullscreen, int screen) {
 #if SDL_VERSION_ATLEAST(2,0,0)
 
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
@@ -149,17 +158,40 @@ void SDLAppDisplay::setVideoMode(int width, int height, bool fullscreen) {
         SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
         SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, (GLuint) multi_sample);
     }
-    
+
     if(enable_alpha) {
         SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8);
     }
-    
+
     Uint32 flags = SDLWindowFlags(fullscreen);
 
     if(gl_context != 0) SDL_GL_DeleteContext(gl_context);
-    if(sdl_window != 0) SDL_DestroyWindow(sdl_window);
 
-    sdl_window = SDL_CreateWindow(gSDLAppTitle.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, flags);
+
+    int position_x = -1;
+    int position_y = -1;
+
+    int display_index = -1;
+
+    if(sdl_window != 0) {
+        display_index = SDL_GetWindowDisplayIndex(sdl_window);
+        SDL_GetWindowPosition(sdl_window, &position_x, &position_y);
+        SDL_DestroyWindow(sdl_window);
+
+    } else if(screen > 0 && screen <= SDL_GetNumVideoDisplays()) {
+        display_index = screen-1;
+    }
+
+    if(display_index != -1) {
+        sdl_window = SDL_CreateWindow(gSDLAppTitle.c_str(), SDL_WINDOWPOS_UNDEFINED_DISPLAY(display_index), SDL_WINDOWPOS_UNDEFINED_DISPLAY(display_index), width, height, flags);
+
+        if(sdl_window && position_x >= 0 && position_y >= 0) {
+            SDL_SetWindowPosition(sdl_window, position_x, position_y);
+        }
+
+    } else {
+        sdl_window = SDL_CreateWindow(gSDLAppTitle.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, flags);
+    }
 
     if (!sdl_window) {
 
@@ -169,7 +201,15 @@ void SDLAppDisplay::setVideoMode(int width, int height, bool fullscreen) {
             SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
             SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
 
-            sdl_window = SDL_CreateWindow(gSDLAppTitle.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, flags);
+            if(display_index != -1) {
+                sdl_window = SDL_CreateWindow(gSDLAppTitle.c_str(), SDL_WINDOWPOS_UNDEFINED_DISPLAY(display_index), SDL_WINDOWPOS_UNDEFINED_DISPLAY(display_index), width, height, flags);
+
+                if(sdl_window && position_x >= 0 && position_y >= 0) {
+                    SDL_SetWindowPosition(sdl_window, position_x, position_y);
+                }
+            } else {
+                sdl_window = SDL_CreateWindow(gSDLAppTitle.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, flags);
+            }
         }
 
         if(!sdl_window) {
@@ -319,6 +359,123 @@ void SDLAppDisplay::toggleFullscreen() {
     this->height = resized_height;
 }
 
+void SDLAppDisplay::toggleFrameless() {
+#if SDL_VERSION_ATLEAST(2,0,0)
+    if(fullscreen) return;
+
+    frameless = !frameless;
+
+    if(frameless) {
+
+        int position_x, position_y;
+        SDL_GetWindowPosition(sdl_window, &position_x, &position_y);
+
+        framed_width  = width;
+        framed_height = height;
+        framed_x      = position_x;
+        framed_y      = position_y;
+
+#ifdef _WIN32
+        SDL_SysWMinfo sys_window_info;
+        SDL_VERSION(&sys_window_info.version);
+
+        if(SDL_GetWindowWMInfo(sdl_window, &sys_window_info)) {
+
+            //make the new window equal the size of the old window including frame
+
+            HWND wnd = sys_window_info.info.win.window;
+
+            RECT rect;
+            GetWindowRect(wnd, &rect);
+
+            position_x = rect.left;
+            position_y = rect.top;
+
+            width  = rect.right - rect.left;
+            height = rect.bottom - rect.top;
+        }
+#endif
+
+        //work around window position changing when when frame is toggled
+        //related bug: https://bugzilla.libsdl.org/show_bug.cgi?id=2791
+
+        SDL_SetWindowBordered(sdl_window, SDL_FALSE);
+        SDL_SetWindowSize(sdl_window, width, height);
+        SDL_SetWindowPosition(sdl_window, position_x, position_y);
+
+        //window needs to be recreated to remove SDL_WINDOW_RESIZABLE flag
+        //otherwise there is still a weird border
+
+        setVideoMode(width, height, fullscreen);
+
+    } else {
+
+#ifdef _WIN32
+        // handle computing framed window position
+        // if launched in frameless mode initially
+        if(framed_width == 0) {
+            SDL_SysWMinfo sys_window_info;
+            SDL_VERSION(&sys_window_info.version);
+
+            if(SDL_GetWindowWMInfo(sdl_window, &sys_window_info)) {
+
+                HWND wnd = sys_window_info.info.win.window;
+
+                RECT old_rect;
+                GetWindowRect(wnd, &old_rect);
+
+                SDL_SetWindowBordered(sdl_window, SDL_TRUE);
+
+                RECT new_rect;
+                GetWindowRect(wnd, &new_rect);
+
+                SDL_GetWindowSize(sdl_window, &framed_width, &framed_height);
+                SDL_GetWindowPosition(sdl_window, &framed_x, &framed_y);
+
+                int width_delta  = (new_rect.right - new_rect.left) - (old_rect.right - old_rect.left);
+                int height_delta = (new_rect.bottom - new_rect.top) - (old_rect.bottom - old_rect.top);
+
+                framed_width  = width - width_delta;
+                framed_height = height - height_delta;
+
+                framed_x += width_delta;
+                framed_y += height_delta;
+
+                // HACK: account for the resizable windows border being 2 pixels wider
+
+                if(resizable) {
+                    framed_x += 2;
+                    framed_y += 2;
+                }
+            }
+        }
+#endif
+        SDL_SetWindowBordered(sdl_window, SDL_TRUE);
+
+        if(framed_width > 0) {
+            width  = framed_width;
+            height = framed_height;
+        }
+
+        SDL_SetWindowSize(sdl_window, width, height);
+
+        if(framed_width > 0) {
+            SDL_SetWindowPosition(sdl_window, framed_x, framed_y);
+        }
+
+        setVideoMode(width, height, fullscreen);
+    }
+#endif
+}
+
+bool SDLAppDisplay::isFullscreen() const {
+    return fullscreen;
+}
+
+bool SDLAppDisplay::isFrameless() const {
+    return frameless;
+}
+
 void SDLAppDisplay::resize(int width, int height) {
 
     int resized_width, resized_height;
@@ -341,7 +498,7 @@ void SDLAppDisplay::resize(int width, int height) {
     this->height = resized_height;
 }
 
-void SDLAppDisplay::init(std::string window_title, int width, int height, bool fullscreen) {
+void SDLAppDisplay::init(std::string window_title, int width, int height, bool fullscreen, int screen) {
 
     if(SDL_Init(SDL_INIT_TIMER | SDL_INIT_VIDEO) != 0) {
         throw SDLInitException(SDL_GetError());
@@ -350,9 +507,13 @@ void SDLAppDisplay::init(std::string window_title, int width, int height, bool f
 
 #if SDL_VERSION_ATLEAST(2,0,0)
 
-    // TODO: which display? is 0 the designated primary display always?
+    // check screen is valid
+    if(screen <= 0 || screen > SDL_GetNumVideoDisplays()) {
+        screen = -1;
+    }
+
     SDL_Rect display_rect;
-    SDL_GetDisplayBounds(0, &display_rect);
+    SDL_GetDisplayBounds(screen > 0 ? screen-1 : 0, &display_rect);
 
     desktop_width  = display_rect.w;
     desktop_height = display_rect.h;
@@ -384,7 +545,7 @@ void SDLAppDisplay::init(std::string window_title, int width, int height, bool f
     SDL_WM_SetCaption(window_title.c_str(),0);
 #endif
 
-    setVideoMode(width, height, fullscreen);
+    setVideoMode(width, height, fullscreen, screen);
 
     //get actual opengl viewport
     GLint viewport[4];

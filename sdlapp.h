@@ -28,8 +28,6 @@
 #ifndef SDLAPP_H
 #define SDLAPP_H
 
-#include "gl.h"
-
 #ifdef _WIN32
 
 #ifdef _WIN32_WINNT
@@ -39,6 +37,8 @@
 #define _WIN32_WINNT 0x0501
 #include "windows.h"
 #endif
+
+#include "gl.h"
 
 #include <string>
 #include <exception>
@@ -97,8 +97,10 @@ class SDLApp {
 protected:
     int  min_delta_msec;
     bool appFinished;
+
     void stop(int return_code);
 
+    virtual bool handleEvent(SDL_Event& event);
 public:
     float fps;
 

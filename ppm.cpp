@@ -16,6 +16,13 @@
 */
 
 #include "ppm.h"
+#include "display.h"
+#include "sdlapp.h"
+
+#ifdef _WIN32
+    #include <io.h>
+    #include <fcntl.h>
+#endif
 
 extern "C" {
 static int dumper_thread(void *arg) {
@@ -96,6 +103,7 @@ void FrameExporter::dump() {
     char* next_pixel_ptr = (pixels_shared_ptr == pixels1) ? pixels2 : pixels1;
 
     // copy pixels - now the right way up
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glReadPixels(0, 0, display.width, display.height,
         GL_RGB, GL_UNSIGNED_BYTE, next_pixel_ptr);
 
@@ -148,6 +156,9 @@ void FrameExporter::dumpThr() {
 PPMExporter::PPMExporter(std::string outputfile) {
 
     if(outputfile == "-") {
+#ifdef _WIN32
+        _setmode( _fileno( stdout ), _O_BINARY );
+#endif // _WIN32
         output = &std::cout;
 
     } else {

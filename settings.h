@@ -40,8 +40,12 @@ protected:
 public:
     int display_width;
     int display_height;
+    int window_x;
+    int window_y;
+    int screen;
     bool multisample;
     bool fullscreen;
+    bool frameless;
     bool transparent;
     bool resizable;
     bool vsync;

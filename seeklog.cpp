@@ -26,8 +26,9 @@
 */
 
 #include "seeklog.h"
+#include "sdlapp.h"
 
-long gSeekLogMaxBufferSize = 104857600;
+long long gSeekLogMaxBufferSize = 104857600;
 
 //StreamLog
 
@@ -107,6 +108,7 @@ bool SeekLog::readFully() {
     if(stream!=0) delete stream;
 
     std::ifstream* file = new std::ifstream(logfile.c_str(), std::ios::in | std::ios::binary | std::ios::ate);
+
     file_size = file->tellg();
 
     if(!file->is_open()) return false;
@@ -118,6 +120,7 @@ bool SeekLog::readFully() {
         stream = file;
         return true;
     }
+
 
     //buffer entire file into memory
     char* filebuffer = new char[file_size+1];

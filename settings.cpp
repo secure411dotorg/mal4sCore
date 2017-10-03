@@ -14,11 +14,10 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
-
+#include "sdlapp.h"
 #include "settings.h"
 #include "regex.h"
-
-#include <time.h>
+#include "timezone.h"
 
 Regex SDLAppSettings_rect_regex("^([0-9.]+)x([0-9.]+)$");
 Regex SDLAppSettings_viewport_regex("^([0-9.]+)x([0-9.]+)(!)?$");
@@ -32,6 +31,9 @@ SDLAppSettings::SDLAppSettings() {
     conf_sections["viewport"]           = "display";
     conf_sections["windowed"]           = "display";
     conf_sections["fullscreen"]         = "display";
+    conf_sections["frameless"]          = "display";
+    conf_sections["screen"]             = "display";
+    conf_sections["window-position"]    = "display";
     conf_sections["multi-sampling"]     = "display";
     conf_sections["output-ppm-stream"]  = "display";
     conf_sections["output-framerate"]   = "display";
@@ -47,7 +49,10 @@ SDLAppSettings::SDLAppSettings() {
     //boolean args
     arg_types["viewport"]          = "string";
     arg_types["windowed"]          = "bool";
+    arg_types["screen"]            = "int";
+    arg_types["window-position"]   = "string";
     arg_types["fullscreen"]        = "bool";
+    arg_types["frameless"]         = "bool";
     arg_types["transparent"]       = "bool";
     arg_types["multi-sampling"]    = "bool";
     arg_types["no-vsync"]          = "bool";
@@ -64,10 +69,16 @@ void SDLAppSettings::setDisplayDefaults() {
     display_height = 768;
 #endif
     fullscreen     = false;
+    frameless      = false;
     multisample    = false;
     transparent    = false;
     resizable      = true;
     vsync          = true;
+
+    screen = -1;
+
+    window_x = -1;
+    window_y = -1;
 
     output_ppm_filename = "";
     output_framerate    = 60;
@@ -86,6 +97,20 @@ void SDLAppSettings::exportDisplaySettings(ConfFile& conf) {
 
     if(fullscreen)
         section->setEntry(new ConfEntry("fullscreen", fullscreen));
+    else {
+        if(frameless)
+            section->setEntry(new ConfEntry("frameless", frameless));
+
+        if(window_x >= 0 && window_y >= 0) {
+            char windowbuff[256];
+            snprintf(windowbuff, 256, "%dx%d", window_x, window_y);
+            section->setEntry(new ConfEntry("window-position", std::string(windowbuff)));
+        }
+    }
+
+    if(screen > 0) {
+        section->setEntry(new ConfEntry("screen", screen));
+    }
 
     if(multisample)
         section->setEntry(new ConfEntry("multi-sampling", multisample));
@@ -249,25 +274,56 @@ void SDLAppSettings::parseArgs(const std::vector<std::string>& arguments, ConfFi
 
 bool SDLAppSettings::parseDateTime(const std::string& datetime, time_t& timestamp) {
 
+    int timezone_offset = 0;
+
+    Regex timestamp_regex("^(\\d{4})-(\\d{2})-(\\d{2})(?: (\\d{1,2}):(\\d{2})(?::(\\d{2}))?)?(?: ([+-])(\\d{1,2}))?$");
+
+    std::vector<std::string> results;
+
+    if(!timestamp_regex.match(datetime, &results) || results.size() < 3) return false;
+
     struct tm timeinfo;
     memset(&timeinfo, 0, sizeof(timeinfo));
 
-    int rc = sscanf(datetime.c_str(), "%04d-%02d-%02d %02d:%02d:%02d",
-                    &timeinfo.tm_year, &timeinfo.tm_mon, &timeinfo.tm_mday,
-                    &timeinfo.tm_hour, &timeinfo.tm_min, &timeinfo.tm_sec);
+    timeinfo.tm_isdst = -1;
+    timeinfo.tm_year = atoi(results[0].c_str()) - 1900;
+    timeinfo.tm_mon  = atoi(results[1].c_str()) - 1;
+    timeinfo.tm_mday = atoi(results[2].c_str());
 
-    if(rc == 3 || rc == 5 || rc == 6) {
-
-        timeinfo.tm_year -= 1900;
-        timeinfo.tm_mon  -= 1;
-        timeinfo.tm_isdst = -1;
-
-        timestamp = mktime(&timeinfo);
-
-        return true;
+    // optional: hours, minutes and seconds
+    if(results.size() >= 5) {
+        timeinfo.tm_hour = atoi(results[3].c_str());
+        timeinfo.tm_min  = atoi(results[4].c_str());
+        if(results.size() >= 6) {
+            timeinfo.tm_sec  = atoi(results[5].c_str());
+        }
     }
 
-    return false;
+    // optional: timezone (optional)
+    if(results.size() >= 8) {
+
+        int tz_hour = atoi(results[7].c_str());
+        int tz_min  = 0;
+
+        if(results.size() >= 9) {
+            tz_min = atoi(results[8].c_str());
+        }
+
+        int tz_offset = tz_hour * 3600 + tz_min * 60;
+
+        if(results[6] == "-") {
+            tz_offset = -tz_offset;
+        }
+        
+        timestamp = mktime_utc(&timeinfo);
+        
+        timestamp -= tz_offset;
+        
+    } else {
+        timestamp = mktime(&timeinfo);
+    }
+
+    return true;
 }
 
 void SDLAppSettings::importDisplaySettings(ConfFile& conffile) {
@@ -286,8 +342,6 @@ void SDLAppSettings::importDisplaySettings(ConfFile& conffile) {
 
         std::string viewport = entry->getString();
 
-
-
         int width  = 0;
         int height = 0;
         bool no_resize = false;
@@ -303,6 +357,22 @@ void SDLAppSettings::importDisplaySettings(ConfFile& conffile) {
         }
     }
 
+    if((entry = display_settings->getEntry("window-position")) != 0) {
+        std::string window_position = entry->getString();
+
+        if(!parseRectangle(window_position, window_x, window_y)) {
+            conffile.invalidValueException(entry);
+        }
+    }
+
+    if((entry = display_settings->getEntry("screen")) != 0) {
+        screen = entry->getInt();
+
+        if(screen < 1) {
+            conffile.invalidValueException(entry);
+        }
+    }
+
     if(display_settings->getBool("multi-sampling")) {
         multisample = true;
     }
@@ -313,6 +383,10 @@ void SDLAppSettings::importDisplaySettings(ConfFile& conffile) {
 
     if(display_settings->getBool("windowed")) {
         fullscreen = false;
+    }
+
+    if(display_settings->getBool("frameless") && !fullscreen) {
+        frameless = true;
     }
 
     // default to use desktop resolution for fullscreen unless specified
@@ -337,11 +411,6 @@ void SDLAppSettings::importDisplaySettings(ConfFile& conffile) {
 
         output_ppm_filename = entry->getString();
 
-#ifdef _WIN32
-        if(output_ppm_filename == "-") {
-            conffile.entryException(entry, "stdout PPM mode not supported on Windows");
-        }
-#endif
     }
 
     if((entry = display_settings->getEntry("output-framerate")) != 0) {
