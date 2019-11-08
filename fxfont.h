@@ -127,14 +127,14 @@ public:
 
 class FXGlyphSet {
     FT_Library freetype;
-    FT_Face ftface;
+    FT_Face ft_face;
+    FT_Int32 ft_flags;
     std::string fontfile;
     int max_height;
     int size;
     int dpi;
     float tab_width;
     vec2 unit_scale;
-
     bool pre_caching;
 
     std::vector<FXGlyphPage*> pages;
@@ -144,12 +144,13 @@ class FXGlyphSet {
     void init();
     FXGlyph* getGlyph(unsigned int chr);
 public:
-    FXGlyphSet(FT_Library freetype, const std::string& fontfile, int size, int dpi);
+    FXGlyphSet(FT_Library freetype, const std::string& fontfile, int size, int dpi, FT_Int32 ft_flags);
     ~FXGlyphSet();
 
     void precache(const std::string& chars);
 
-    FT_Face getFTFace() const { return ftface; }
+    FT_Face getFTFace() const { return ft_face; }
+    FT_Int32 getFlags() const { return ft_flags; }
 
     const std::string& getFontFile() const { return fontfile; }
 
@@ -196,6 +197,7 @@ public:
     void draw(float x, float y, const std::string& text) const;
 
     float getWidth(const std::string& text) const;
+    float getHeight() const;
 
     float getAscender() const;
     float getDescender() const;
@@ -251,7 +253,7 @@ public:
     void commitBuffer();
     void drawBuffer();
 
-    FXFont grab(std::string font_file, int size, int dpi = 72);
+    FXFont grab(std::string font_file, int size, int dpi = 72, FT_Int32 ft_flags = FT_LOAD_DEFAULT);
 };
 
 extern FXFontManager fontmanager;
