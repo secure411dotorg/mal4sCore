@@ -292,7 +292,7 @@ FXGlyph* FXGlyphSet::getGlyph(unsigned int chr) {
         //allocate page using maximum allowed texture size
         GLint max_texture_size;
         glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
-        max_texture_size = std::min( 512, max_texture_size );
+        max_texture_size = glm::min( 512, max_texture_size );
 
         page = new FXGlyphPage(max_texture_size, max_texture_size);
 
@@ -639,7 +639,7 @@ void FXFontManager::purge() {
 
 FXFont FXFontManager::grab(std::string font_file, int size, int dpi, FT_Int32 ft_flags) {
 
-    if(font_dir.size()>0 && font_file[0] != '/') {
+    if(font_dir.size()>0 && !(font_file.size() > 2 && font_file[1] == ':') && !(font_file.size() > 1 && font_file[0] == '/')) {
         font_file = font_dir + font_file;
     }
 

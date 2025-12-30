@@ -30,6 +30,10 @@
 #include "logger.h"
 #include "SDL_syswm.h"
 
+#ifndef _MSC_VER
+#include <unistd.h>
+#endif
+
 std::string gSDLAppResourceDir;
 std::string gSDLAppConfDir;
 
@@ -98,11 +102,6 @@ void SDLApp::resizeConsole(int height) {
 }
 
 #endif
-
-bool SDLAppDirExists(std::string dir) {
-    struct stat st;
-    return !stat(dir.c_str(), &st) && S_ISDIR(st.st_mode);
-}
 
 std::string SDLAppAddSlash(std::string path) {
 
@@ -214,13 +213,13 @@ void SDLAppInit(std::string apptitle, std::string execname, std::string exepath)
 #endif
 
 #ifdef SDLAPP_CONF_DIR
-    if (SDLAppDirExists(SDLAPP_CONF_DIR)) {
+    if (ResourceManager::dirExists(SDLAPP_CONF_DIR)) {
         conf_dir = SDLAPP_CONF_DIR;
     }
 #endif
 
 #ifdef SDLAPP_RESOURCE_DIR
-    if (SDLAppDirExists(SDLAPP_RESOURCE_DIR)) {
+    if (ResourceManager::dirExists(SDLAPP_RESOURCE_DIR)) {
         resource_dir = SDLAPP_RESOURCE_DIR;
         fonts_dir    = SDLAPP_RESOURCE_DIR + std::string("/fonts/");
         shaders_dir  = SDLAPP_RESOURCE_DIR + std::string("/shaders/");
@@ -239,7 +238,7 @@ void SDLAppInit(std::string apptitle, std::string execname, std::string exepath)
 #endif
 
 #ifdef SDLAPP_FONT_DIR
-    if (SDLAppDirExists(SDLAPP_FONT_DIR)) {
+    if (ResourceManager::dirExists(SDLAPP_FONT_DIR)) {
         fonts_dir    = SDLAPP_FONT_DIR;
     }
 #endif
@@ -348,9 +347,15 @@ bool SDLApp::handleEvent(SDL_Event& event) {
             quit();
             break;
 
-        case SDL_MOUSEMOTION:
-            mouseMove(&event.motion);
+        case SDL_MOUSEMOTION: {
+            SDL_MouseMotionEvent motion = event.motion;
+            motion.x *= display.viewport_dpi_ratio.x;
+            motion.y *= display.viewport_dpi_ratio.y;
+            motion.xrel *= display.viewport_dpi_ratio.x;
+            motion.yrel *= display.viewport_dpi_ratio.y;
+            mouseMove(&motion);
             break;
+        }
 
 #if SDL_VERSION_ATLEAST(2,0,0)
         case SDL_TEXTINPUT:
@@ -377,9 +382,13 @@ bool SDLApp::handleEvent(SDL_Event& event) {
 #endif
 
         case SDL_MOUSEBUTTONDOWN:
-        case SDL_MOUSEBUTTONUP:
-            mouseClick(&event.button);
+        case SDL_MOUSEBUTTONUP: {
+            SDL_MouseButtonEvent button = event.button;
+            button.x *= display.viewport_dpi_ratio.x;
+            button.y *= display.viewport_dpi_ratio.y;
+            mouseClick(&button);
             break;
+        }
 
         case SDL_KEYDOWN:
         case SDL_KEYUP:

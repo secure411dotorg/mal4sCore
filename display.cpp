@@ -43,6 +43,8 @@ SDLAppDisplay::SDLAppDisplay() {
     vsync           = false;
     resizable       = false;
     frameless       = false;
+    experimental    = false;
+    high_dpi_aware  = false;
     multi_sample    = 0;
     width           = 0;
     height          = 0;
@@ -50,6 +52,7 @@ SDLAppDisplay::SDLAppDisplay() {
     desktop_height  = 0;
     windowed_width  = 0;
     windowed_height = 0;
+    viewport_dpi_ratio = vec2(1.0f, 1.0f);
 #if SDL_VERSION_ATLEAST(2,0,0)
     sdl_window = 0;
     gl_context = 0;
@@ -82,6 +85,10 @@ Uint32 SDLAppDisplay::SDLWindowFlags(bool fullscreen) {
     if (frameless) flags |= SDL_WINDOW_BORDERLESS;
     if (resizable && !frameless) flags |= SDL_WINDOW_RESIZABLE;
     if (fullscreen) flags |= SDL_WINDOW_FULLSCREEN;
+#ifndef _WIN32
+    // see setWindowsHighDPIAwareness() work around for Windows
+    if(high_dpi_aware) flags |= SDL_WINDOW_ALLOW_HIGHDPI;
+#endif
 #else
     Uint32 flags = SDL_OPENGL | SDL_HWSURFACE | SDL_ANYFORMAT | SDL_DOUBLEBUF;
 
@@ -108,8 +115,16 @@ void SDLAppDisplay::enableFrameless(bool frameless) {
     this->frameless = frameless;
 }
 
+void SDLAppDisplay::enableHighDPIAwareness(bool enable) {
+    high_dpi_aware = enable;
+}
+
 void SDLAppDisplay::enableAlpha(bool enable) {
     enable_alpha = enable;
+}
+
+void SDLAppDisplay::enableExperimental(bool enable) {
+    experimental = enable;
 }
 
 void SDLAppDisplay::multiSample(int samples) {
@@ -118,9 +133,16 @@ void SDLAppDisplay::multiSample(int samples) {
 
 void SDLAppDisplay::setupExtensions() {
 
+    if(experimental) glewExperimental = true;
+
     GLenum err = glewInit();
 
+#ifdef GLEW_ERROR_NO_GLX_DISPLAY
+    // Ignore GLEW_ERROR_NO_GLX_DISPLAY error as wont have GLX if using Wayland
+    if (GLEW_OK != err && GLEW_ERROR_NO_GLX_DISPLAY != err) {
+#else
     if (GLEW_OK != err) {
+#endif
         /* Problem: glewInit failed, something is seriously wrong. */
         char glewerr[1024];
         snprintf(glewerr, 1024, "GLEW Error: %s", glewGetErrorString(err));
@@ -147,6 +169,17 @@ LRESULT CALLBACK window_filter_proc(HWND wnd, UINT msg, WPARAM wparam, LPARAM lp
    return CallWindowProc(window_proc, wnd, msg, wparam, lparam);
 }
 #endif
+
+void SDLAppDisplay::updateViewportDPIRatio() {
+    int drawable_width, drawable_height;
+    SDL_GL_GetDrawableSize(sdl_window, &drawable_width, &drawable_height);
+    
+    int sdl_window_width, sdl_window_height;
+    SDL_GetWindowSize(sdl_window, &sdl_window_width, &sdl_window_height);
+
+    viewport_dpi_ratio = vec2(drawable_width, drawable_height) / vec2(sdl_window_width, sdl_window_height);
+    debugLog("viewport dpi ratio %.2f x %.2f", viewport_dpi_ratio.x, viewport_dpi_ratio.y);
+}
 
 void SDLAppDisplay::setVideoMode(int width, int height, bool fullscreen, int screen) {
 #if SDL_VERSION_ATLEAST(2,0,0)
@@ -218,7 +251,11 @@ void SDLAppDisplay::setVideoMode(int width, int height, bool fullscreen, int scr
         }
     }
 
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+
     gl_context = SDL_GL_CreateContext(sdl_window);
+
+    debugLog("opengl version %s", glGetString(GL_VERSION));
 
     if(!gl_context) {
         std::string sdlerr(SDL_GetError());
@@ -342,7 +379,10 @@ void SDLAppDisplay::toggleFullscreen() {
 
 #if SDL_VERSION_ATLEAST(2,0,0)
     SDL_SetWindowFullscreen(sdl_window, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
-    SDL_GetWindowSize(sdl_window, &resized_width, &resized_height);
+
+    SDL_GL_GetDrawableSize(sdl_window, &resized_width, &resized_height);
+
+    updateViewportDPIRatio();
 #else
     setVideoMode(width, height, fullscreen);
 
@@ -360,6 +400,11 @@ void SDLAppDisplay::toggleFullscreen() {
 }
 
 void SDLAppDisplay::toggleFrameless() {
+#ifdef __APPLE__
+    debugLog("Frameless toggle not supported");
+    return;
+#endif
+
 #if SDL_VERSION_ATLEAST(2,0,0)
     if(fullscreen) return;
 
@@ -477,11 +522,14 @@ bool SDLAppDisplay::isFrameless() const {
 }
 
 void SDLAppDisplay::resize(int width, int height) {
+    debugLog("resize %d x %d", width, height);
 
     int resized_width, resized_height;
 
 #if SDL_VERSION_ATLEAST(2,0,0)
-    SDL_GetWindowSize(sdl_window, &resized_width, &resized_height);
+    SDL_GL_GetDrawableSize(sdl_window, &resized_width, &resized_height);
+
+    updateViewportDPIRatio();
 #else
     setVideoMode(width, height, fullscreen);
 
@@ -498,12 +546,54 @@ void SDLAppDisplay::resize(int width, int height) {
     this->height = resized_height;
 }
 
+
+#ifdef _WIN32
+void setWindowsHighDPIAwareness() {
+    // Because SDL2 doesn't currently do anything if you set SDL_WINDOW_ALLOW_HIGHDPI
+    // on Windows, it is necessary to manually tell Windows your application supports high DPI,
+    // otherwise it will give you a 1920x1080 window when you request 3840x2160 on a 4K display
+
+    // https://discourse.libsdl.org/t/sdl-getdesktopdisplaymode-resolution-reported-in-windows-10-when-using-app-scaling/22389/3
+
+    typedef enum PROCESS_DPI_AWARENESS {
+      PROCESS_DPI_UNAWARE = 0,
+      PROCESS_SYSTEM_DPI_AWARE = 1,
+      PROCESS_PER_MONITOR_DPI_AWARE = 2
+    } ;
+
+    BOOL(WINAPI *SetProcessDPIAware)(void) = NULL;
+    HRESULT(WINAPI *SetProcessDpiAwareness)(PROCESS_DPI_AWARENESS dpiAwareness) = NULL;
+
+    if (void* userDLL = SDL_LoadObject("USER32.DLL")) {
+        SetProcessDPIAware = (BOOL(WINAPI *)(void)) SDL_LoadFunction(userDLL, "SetProcessDPIAware");
+    }
+
+    if (void* shcoreDLL = SDL_LoadObject("SHCORE.DLL")) {
+        SetProcessDpiAwareness = (HRESULT(WINAPI *)(PROCESS_DPI_AWARENESS)) SDL_LoadFunction(shcoreDLL, "SetProcessDpiAwareness");
+    }
+
+    if (SetProcessDpiAwareness) {
+        // Windows 8.1 and later
+        HRESULT result = SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
+        debugLog("SetProcessDpiAwareness %d", (result == S_OK) ? 1 : 0);
+
+    } else if (SetProcessDPIAware) {
+        // Vista / Windows 8
+        BOOL success = SetProcessDPIAware();
+        debugLog("SetProcessDPIAware %d", (int)success);
+    }
+}
+#endif
+
 void SDLAppDisplay::init(std::string window_title, int width, int height, bool fullscreen, int screen) {
 
     if(SDL_Init(SDL_INIT_TIMER | SDL_INIT_VIDEO) != 0) {
         throw SDLInitException(SDL_GetError());
     }
 
+#ifdef _WIN32
+    if(high_dpi_aware) setWindowsHighDPIAwareness();
+#endif
 
 #if SDL_VERSION_ATLEAST(2,0,0)
 
@@ -545,6 +635,8 @@ void SDLAppDisplay::init(std::string window_title, int width, int height, bool f
     SDL_WM_SetCaption(window_title.c_str(),0);
 #endif
 
+    debugLog("requesting video mode %d x %d", width, height);
+
     setVideoMode(width, height, fullscreen, screen);
 
     //get actual opengl viewport
@@ -554,6 +646,15 @@ void SDLAppDisplay::init(std::string window_title, int width, int height, bool f
     this->width      = viewport[2];
     this->height     = viewport[3];
     this->fullscreen = fullscreen;
+
+    debugLog("opengl viewport %d x %d", this->width, this->height);
+
+    int drawable_width, drawable_height;
+    SDL_GL_GetDrawableSize(this->sdl_window, &drawable_width, &drawable_height);
+
+    debugLog("drawable size %d x %d", drawable_width, drawable_height);
+
+    updateViewportDPIRatio();
 
     glViewport(0, 0, this->width, this->height);
 }

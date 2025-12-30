@@ -39,7 +39,6 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 #include <vector>
 #include <string>
@@ -61,6 +60,8 @@ class SDLAppDisplay {
     bool resizable;
     bool fullscreen;
     bool frameless;
+    bool experimental;
+    bool high_dpi_aware;
     bool vsync;
 
     int  zbuffer_depth;
@@ -69,10 +70,12 @@ class SDLAppDisplay {
     Uint32 SDLWindowFlags(bool fullscreen);
 
     void setupExtensions();
+    void updateViewportDPIRatio();
 public:
     int width, height;
     int desktop_width, desktop_height;
     int windowed_width, windowed_height;
+    vec2 viewport_dpi_ratio;
 
 #if SDL_VERSION_ATLEAST(2,0,0)
     SDL_Window*   sdl_window;
@@ -116,6 +119,8 @@ public:
     void   enableAlpha(bool enable);
     void   enableResize(bool resizable);
     void   enableFrameless(bool frameless);
+    void   enableHighDPIAwareness(bool enable);
+    void   enableExperimental(bool enable);
 
     void   multiSample(int sample);
 

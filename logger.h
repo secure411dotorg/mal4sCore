@@ -31,6 +31,7 @@
 #include <map>
 #include <deque>
 #include <string>
+#include <sstream>
 
 enum logger_level { LOG_LEVEL_OFF, LOG_LEVEL_ERROR, LOG_LEVEL_CONSOLE, LOG_LEVEL_INFO, LOG_LEVEL_SCRIPT, LOG_LEVEL_DEBUG, LOG_LEVEL_WARN, LOG_LEVEL_PEDANTIC };
 
@@ -51,6 +52,7 @@ protected:
     int level;
     static Logger* default_logger;
     int message_count;
+    bool auto_flush;
 public:
     static Logger* getDefault();
 
@@ -62,6 +64,7 @@ public:
     int getMessageCount();
 
     void setHistoryCapacity(int hist_capacity);
+    void setAutoFlush(bool auto_flush);
 
     Logger(int level, FILE* stream, int history_capacity = 0);
 
@@ -77,5 +80,43 @@ void errorLog(const char *args, ...);
 void consoleLog(const char *args, ...);
 void scriptLog(const char *args, ...);
 void pedanticLog(const char *args, ...);
+
+class LoggerStringStream {
+protected:
+    Logger* logger;
+    std::ostringstream* ss;
+    logger_level log_level;
+    int count;
+public:
+    LoggerStringStream(logger_level level) : ss(nullptr), log_level(level), count(0) {
+        logger = Logger::getDefault();
+    }
+    ~LoggerStringStream() {
+        if(logger && ss != nullptr && count > 0) {
+            logger->message(log_level, ss->str());
+        }
+        delete ss;
+    }
+
+    template<class T>
+    LoggerStringStream& operator<<(const T& value) {
+        if(logger != nullptr && logger->getLevel() >= log_level) {
+            if(!ss) ss = new std::ostringstream();
+            if(count > 0) {
+                *ss << " ";
+            }
+            *ss << value;
+            count++;
+        }
+        return *this;
+    }
+};
+
+LoggerStringStream WarnLog();
+LoggerStringStream DebugLog();
+LoggerStringStream InfoLog();
+LoggerStringStream ErrorLog();
+LoggerStringStream ConsoleLog();
+LoggerStringStream ScriptLog();
 
 #endif
